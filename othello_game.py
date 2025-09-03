@@ -312,12 +312,110 @@ class SuperOthelloAI:
                 elif board.board[r][c] == opponent:
                     score -= self.position_weights[r][c]
         
-        # 7. 엔드게임에서는 돌 개수가 중요
-        if phase == "ENDGAME":
-            disc_diff = board.count_discs(player) - board.count_discs(opponent)
-            score += disc_diff * 100
+        # 7. 🏆 소식-대식 전략 (우승자 핵심 전략)
+        my_count = board.count_discs(player)
+        opp_count = board.count_discs(opponent)
+        disc_diff = my_count - opp_count
+        
+        # 🎯 전략 전환 시점 결정
+        transition_point = self._get_strategy_transition_point(board, phase, empty_count)
+        
+        if phase == "OPENING":
+            # 초반: 균형잡힌 소식전략 (너무 극단적이지 않게)
+            # 🚨 안전장치: 너무 많이 뒤처지면 소식전략 포기
+            if disc_diff < -10:  # 10개 이상 뒤처지면 방어적 전환
+                score += disc_diff * 2  # 방어적으로 돌 확보
+            elif transition_point < 0.3:  # 매우 초반
+                score += disc_diff * -3  # 적당히 적게 먹기 선호
+            else:
+                score += disc_diff * -1  # 약간 소식 선호
+                
+        elif phase == "MIDGAME":
+            # 중반: 점진적 전환
+            if transition_point < 0.5:
+                score += disc_diff * -1  # 약간 소식
+            else:
+                score += disc_diff * 3   # 대식으로 전환 시작
+                
+        else:  # ENDGAME
+            # 후반: 대식전략 (많이 먹기)
+            if transition_point > 0.8:
+                score += disc_diff * 150  # 매우 적극적으로 많이 먹기
+            else:
+                score += disc_diff * 100  # 많이 먹기 선호
+        
+        # 8. 🎲 점령율 평가 (우승자 방식)
+        total_discs = my_count + opp_count
+        if total_discs > 0:
+            occupation_rate = my_count / total_discs
+            
+            # 초반엔 낮은 점령율 선호, 후반엔 높은 점령율 선호
+            if phase == "OPENING":
+                # 30-40% 점령율이 이상적
+                ideal_rate = 0.35
+                rate_penalty = abs(occupation_rate - ideal_rate) * -80
+            elif phase == "MIDGAME":
+                # 40-50% 점령율이 이상적  
+                ideal_rate = 0.45
+                rate_penalty = abs(occupation_rate - ideal_rate) * -40
+            else:  # ENDGAME
+                # 50%+ 점령율 선호
+                rate_penalty = max(0, occupation_rate - 0.5) * 120
+            
+            score += rate_penalty
         
         return score
+    
+    def _get_strategy_transition_point(self, board: OthelloBoard, phase: str, empty_count: int) -> float:
+        """🎯 소식-대식 전략 전환 시점 결정"""
+        # 기본 게임 진행도 (0.0 = 게임 시작, 1.0 = 게임 끝)
+        game_progress = (64 - empty_count) / 64
+        
+        # 🧠 상황별 가중치 조정
+        my_moves = len(board.get_valid_moves(WHITE))  # AI 이동성
+        opp_moves = len(board.get_valid_moves(BLACK))  # 상대 이동성
+        
+        # 상대 이동성이 제한될수록 전환 시점을 앞당김
+        mobility_factor = 0
+        if opp_moves + my_moves > 0:
+            mobility_factor = opp_moves / (opp_moves + my_moves)
+        
+        # 코너 장악 상황
+        corners_owned = 0
+        for r, c in self.corner_positions:
+            if board.board[r][c] == WHITE:  # AI가 코너 소유
+                corners_owned += 1
+        corner_factor = corners_owned / 4  # 0~1
+        
+        # 🎯 종합 전환 시점 계산
+        # - 게임 진행도가 기본
+        # - 상대 이동성이 낮으면 더 일찍 전환 (공격 기회)
+        # - 코너를 많이 소유하면 더 일찍 전환 (안전한 공격)
+        transition_point = (
+            game_progress * 0.6 +           # 게임 진행도 60%
+            (1 - mobility_factor) * 0.25 +  # 상대 이동성 제한 25%
+            corner_factor * 0.15            # 코너 장악도 15%
+        )
+        
+        return min(1.0, transition_point)
+    
+    def _get_current_strategy(self, phase: str, transition_point: float) -> str:
+        """🎯 현재 사용 중인 전략 표시"""
+        if phase == "OPENING":
+            if transition_point < 0.3:
+                return "🍃 소식전략 (적게먹기)"
+            else:
+                return "🌱 소식전략 (약함)"
+        elif phase == "MIDGAME":
+            if transition_point < 0.5:
+                return "⚖️ 균형전략 (소식→대식)"
+            else:
+                return "🔥 대식전환 (공격시작)"
+        else:  # ENDGAME
+            if transition_point > 0.8:
+                return "⚡ 초대식전략 (최대공격)"
+            else:
+                return "🏆 대식전략 (많이먹기)"
     
     def _calculate_stability(self, board: OthelloBoard, player: int) -> int:
         """안정성 계산 (뒤집히지 않는 돌들)"""
@@ -371,7 +469,12 @@ class SuperOthelloAI:
         elif empty_count <= 10:  # 10수 이하는 깊이 증가
             search_depth = min(8, empty_count + 2)
         
+        # 🎯 전략 정보 표시
+        transition_point = self._get_strategy_transition_point(board, game_phase, empty_count)
+        strategy = self._get_current_strategy(game_phase, transition_point)
+        
         print(f"🧠 AI 분석: {game_phase} 단계, 탐색깊이 {search_depth}")
+        print(f"🎯 전략: {strategy} (전환점: {transition_point:.2f})")
         
         # 오프닝 북 사용
         move_count = 64 - empty_count
