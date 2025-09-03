@@ -235,12 +235,28 @@ class SuperOthelloAI:
         
         # 1. 코너 장악 (절대적 우위)
         corner_score = 0
+        player_corners = 0
+        opponent_corners = 0
         for r, c in self.corner_positions:
             if board.board[r][c] == player:
                 corner_score += 1000
+                player_corners += 1
             elif board.board[r][c] == opponent:
                 corner_score -= 1000
+                opponent_corners += 1
         score += corner_score
+        
+        # 🎯 코너 정보 출력 (디버깅용)
+        if player_corners > 0 or opponent_corners > 0:
+            print(f"🏰 코너: AI {player_corners}개, 상대 {opponent_corners}개 (점수: {corner_score:+d})")
+        
+        # 🚨 코너 기회 알림 (디버깅용)
+        available_corners = []
+        for r, c in self.corner_positions:
+            if board.board[r][c] == EMPTY and board.is_valid_move(r, c, player):
+                available_corners.append((r, c))
+        if available_corners:
+            print(f"🎯 코너 기회 발견: {available_corners} - 절대 놓치지 마세요!")
         
         # 2. X-square 페널티 (코너 인접 대각선)
         for r, c in self.x_squares:
@@ -320,16 +336,16 @@ class SuperOthelloAI:
         if my_stability > 0 or opp_stability > 0:
             print(f"🛡️ 굳힘돌: AI {my_stability}개, 상대 {opp_stability}개 (차이: {stability_diff:+d})")
         
-        # 게임 단계별 굳힘돌 가중치 (코너급 중요도)
+        # 게임 단계별 굳힘돌 가중치 (코너보다 낮게 설정)
         if phase == "OPENING":
-            # 초반: 굳힘돌이 코너만큼 중요 (소식전략과 결합)
-            stability_weight = 200
+            # 초반: 굳힘돌 중요하지만 코너보다는 낮게
+            stability_weight = 50
         elif phase == "MIDGAME":
-            # 중반: 굳힘돌로 기반 다지기 (코너보다 중요)
-            stability_weight = 250
+            # 중반: 굳힘돌 중요도 증가하지만 여전히 코너보다 낮게
+            stability_weight = 80
         else:  # ENDGAME
-            # 후반: 굳힘돌이 승부 결정 (최고 우선순위)
-            stability_weight = 300
+            # 후반: 굳힘돌 중요하지만 코너 절대 우선
+            stability_weight = 120
         
         score += stability_diff * stability_weight
         
@@ -350,21 +366,38 @@ class SuperOthelloAI:
         transition_point = self._get_strategy_transition_point(board, phase, empty_count)
         
         if phase == "OPENING":
-            # 초반: 균형잡힌 소식전략 (너무 극단적이지 않게)
-            # 🚨 안전장치: 너무 많이 뒤처지면 소식전략 포기
-            if disc_diff < -10:  # 10개 이상 뒤처지면 방어적 전환
-                score += disc_diff * 2  # 방어적으로 돌 확보
-            elif transition_point < 0.3:  # 매우 초반
-                score += disc_diff * -3  # 적당히 적게 먹기 선호
-            else:
-                score += disc_diff * -1  # 약간 소식 선호
+            # 🎯 선공/후공 차별화 전략
+            is_first_player = (player == BLACK)  # 검은색이 선공
+            
+            if is_first_player:  # 선공 전략 (적극적)
+                if disc_diff < -6:  # 6개 이상 뒤처지면 적극 공격
+                    score += disc_diff * 4  # 매우 적극적으로 돌 확보
+                elif transition_point < 0.3:  # 초반
+                    score += disc_diff * 1  # 약간 많이 먹기 선호 (적극적)
+                else:
+                    score += disc_diff * 2  # 중반 전환기에 적극적
+            else:  # 후공 전략 (반격 중심)
+                if disc_diff < -10:  # 10개 이상 뒤처지면 방어
+                    score += disc_diff * 2  # 방어적으로 돌 확보
+                elif transition_point < 0.4:  # 후공은 더 오래 소식 유지
+                    score += disc_diff * -2  # 소식 전략 유지
+                else:
+                    score += disc_diff * 0  # 중립적 유지
                 
         elif phase == "MIDGAME":
-            # 중반: 점진적 전환
-            if transition_point < 0.5:
-                score += disc_diff * -1  # 약간 소식
-            else:
-                score += disc_diff * 3   # 대식으로 전환 시작
+            # 🎯 중반: 선공/후공 차별화 전략
+            is_first_player = (player == BLACK)
+            
+            if is_first_player:  # 선공은 빠른 대식 전환
+                if transition_point < 0.4:
+                    score += disc_diff * 1   # 약간 대식
+                else:
+                    score += disc_diff * 4   # 적극적 대식 전환
+            else:  # 후공은 신중한 전환
+                if transition_point < 0.6:
+                    score += disc_diff * -0.5  # 약간 소식 유지
+                else:
+                    score += disc_diff * 2.5   # 늦은 대식 전환
                 
         else:  # ENDGAME
             # 후반: 대식전략 (많이 먹기)
@@ -428,23 +461,38 @@ class SuperOthelloAI:
         
         return min(1.0, transition_point)
     
-    def _get_current_strategy(self, phase: str, transition_point: float) -> str:
+    def _get_current_strategy(self, phase: str, transition_point: float, player: int) -> str:
         """🎯 현재 사용 중인 전략 표시"""
+        is_first_player = (player == BLACK)
+        player_type = "선공" if is_first_player else "후공"
+        
         if phase == "OPENING":
-            if transition_point < 0.3:
-                return "🍃 소식전략 (적게먹기)"
-            else:
-                return "🌱 소식전략 (약함)"
+            if is_first_player:  # 선공
+                if transition_point < 0.3:
+                    return f"⚡ {player_type} 적극전략 (주도권)"
+                else:
+                    return f"🔥 {player_type} 공격전환 (압박)"
+            else:  # 후공
+                if transition_point < 0.4:
+                    return f"🛡️ {player_type} 소식전략 (반격준비)"
+                else:
+                    return f"⚖️ {player_type} 균형전략 (기회대기)"
         elif phase == "MIDGAME":
-            if transition_point < 0.5:
-                return "⚖️ 균형전략 (소식→대식)"
-            else:
-                return "🔥 대식전환 (공격시작)"
+            if is_first_player:  # 선공
+                if transition_point < 0.4:
+                    return f"🎯 {player_type} 빠른대식 (주도)"
+                else:
+                    return f"⚡ {player_type} 적극공격 (결정적)"
+            else:  # 후공
+                if transition_point < 0.6:
+                    return f"🌱 {player_type} 신중소식 (반격)"
+                else:
+                    return f"🔥 {player_type} 늦은대식 (역전)"
         else:  # ENDGAME
             if transition_point > 0.8:
-                return "⚡ 초대식전략 (최대공격)"
+                return f"⚡ {player_type} 최대공격 (승부)"
             else:
-                return "🏆 대식전략 (많이먹기)"
+                return f"🏆 {player_type} 대식전략 (마무리)"
     
     def _calculate_stability(self, board: OthelloBoard, player: int) -> int:
         """🛡️ 고도화된 굳힘돌 계산 (우승자 핵심 전략)"""
@@ -666,7 +714,7 @@ class SuperOthelloAI:
         
         # 🎯 전략 정보 표시
         transition_point = self._get_strategy_transition_point(board, game_phase, empty_count)
-        strategy = self._get_current_strategy(game_phase, transition_point)
+        strategy = self._get_current_strategy(game_phase, transition_point, player)
         
         print(f"🧠 AI 분석: {game_phase} 단계, 탐색깊이 {search_depth}")
         print(f"🎯 전략: {strategy} (전환점: {transition_point:.2f})")
@@ -717,7 +765,7 @@ class SuperOthelloAI:
             
             # 코너 > 가장자리 > 일반 순으로 우선순위
             if (r, c) in self.corner_positions:
-                priority += 1000  # 코너 최우선
+                priority += 10000  # 코너 절대 최우선!
             elif self._is_edge_stable(board, r, c, player):
                 priority += 100   # 안정적인 가장자리
             elif (r, c) in self.x_squares:
