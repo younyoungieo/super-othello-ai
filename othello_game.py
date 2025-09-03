@@ -162,6 +162,10 @@ class SuperOthelloAI:
             "MIDGAME": 4,    # 중반: 적당한 탐색 (1-2초 응답)
             "ENDGAME": 6     # 후반: 깊은 탐색 (3-5초 응답)
         }
+        # 🚀 성능 최적화: 굳힘돌 계산 캐시
+        self.stability_cache = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
         self.position_weights = self._create_position_weights()
         self.corner_positions = [(0,0), (0,7), (7,0), (7,7)]
         self.x_squares = [(1,1), (1,6), (6,1), (6,6)]  # 절대 피해야 할 위치
@@ -300,9 +304,34 @@ class SuperOthelloAI:
         
         score += mobility_score
         
-        # 5. 안정성 (가장자리 돌들)
-        stability_score = self._calculate_stability(board, player)
-        score += stability_score * 75
+        # 5. 🛡️ 굳힘돌 안정성 (우승자 핵심 전략)
+        import time
+        start_time = time.time()
+        
+        my_stability = self._calculate_stability(board, player)
+        opp_stability = self._calculate_stability(board, opponent)
+        stability_diff = my_stability - opp_stability
+        
+        calc_time = time.time() - start_time
+        if calc_time > 0.01:  # 10ms 이상이면 경고
+            print(f"⚠️ 굳힘돌 계산 시간: {calc_time:.3f}초")
+        
+        # 굳힘돌 정보 표시 (디버깅용)
+        if my_stability > 0 or opp_stability > 0:
+            print(f"🛡️ 굳힘돌: AI {my_stability}개, 상대 {opp_stability}개 (차이: {stability_diff:+d})")
+        
+        # 게임 단계별 굳힘돌 가중치 (코너급 중요도)
+        if phase == "OPENING":
+            # 초반: 굳힘돌이 코너만큼 중요 (소식전략과 결합)
+            stability_weight = 200
+        elif phase == "MIDGAME":
+            # 중반: 굳힘돌로 기반 다지기 (코너보다 중요)
+            stability_weight = 250
+        else:  # ENDGAME
+            # 후반: 굳힘돌이 승부 결정 (최고 우선순위)
+            stability_weight = 300
+        
+        score += stability_diff * stability_weight
         
         # 6. 위치별 가중치
         for r in range(BOARD_SIZE):
@@ -418,17 +447,183 @@ class SuperOthelloAI:
                 return "🏆 대식전략 (많이먹기)"
     
     def _calculate_stability(self, board: OthelloBoard, player: int) -> int:
-        """안정성 계산 (뒤집히지 않는 돌들)"""
-        stable_count = 0
+        """🛡️ 고도화된 굳힘돌 계산 (우승자 핵심 전략)"""
+        # 🚀 캐시 체크 (성능 최적화)
+        board_key = (tuple(board.board.flatten()), player)
+        if board_key in self.stability_cache:
+            self.cache_hits += 1
+            return self.stability_cache[board_key]
         
-        # 가장자리와 코너 근처의 안정한 돌들 계산
+        self.cache_misses += 1
+        stable_discs = set()
+        opponent = BLACK if player == WHITE else WHITE
+        
+        # 1️⃣ 코너에서 시작하는 안정한 체인 계산
+        for corner_r, corner_c in self.corner_positions:
+            if board.board[corner_r][corner_c] == player:
+                self._find_stable_chain(board, corner_r, corner_c, player, stable_discs)
+        
+        # 2️⃣ 가장자리 완전 장악 체크
+        stable_discs.update(self._find_stable_edges(board, player))
+        
+        # 3️⃣ 방향별 완전 안정성 체크 (8방향 모두 안전)
         for r in range(BOARD_SIZE):
             for c in range(BOARD_SIZE):
-                if board.board[r][c] == player:
-                    if self._is_stable_position(board, r, c, player):
-                        stable_count += 1
+                if board.board[r][c] == player and (r, c) not in stable_discs:
+                    if self._is_fully_stable(board, r, c, player):
+                        stable_discs.add((r, c))
         
-        return stable_count
+        # 🚀 캐시에 결과 저장
+        result = len(stable_discs)
+        self.stability_cache[board_key] = result
+        
+        # 캐시 크기 제한 (메모리 관리)
+        if len(self.stability_cache) > 1000:
+            # 오래된 캐시 절반 삭제
+            keys_to_remove = list(self.stability_cache.keys())[:500]
+            for key in keys_to_remove:
+                del self.stability_cache[key]
+        
+        return result
+    
+    def _find_stable_chain(self, board: OthelloBoard, start_r: int, start_c: int, 
+                          player: int, stable_discs: set):
+        """🔗 코너에서 시작하는 안정한 체인 찾기"""
+        if (start_r, start_c) in stable_discs:
+            return
+        
+        # BFS로 연결된 안정한 돌들 찾기
+        queue = [(start_r, start_c)]
+        visited = {(start_r, start_c)}
+        stable_chain = [(start_r, start_c)]
+        
+        while queue:
+            r, c = queue.pop(0)
+            
+            # 8방향으로 인접한 돌 체크
+            for dr, dc in DIRECTIONS:
+                nr, nc = r + dr, c + dc
+                
+                if (0 <= nr < BOARD_SIZE and 0 <= nc < BOARD_SIZE and 
+                    (nr, nc) not in visited and board.board[nr][nc] == player):
+                    
+                    # 이 돌이 안정한지 체크
+                    if self._is_chain_stable(board, nr, nc, player, stable_discs):
+                        visited.add((nr, nc))
+                        queue.append((nr, nc))
+                        stable_chain.append((nr, nc))
+        
+        # 체인의 모든 돌을 안정한 돌로 추가
+        stable_discs.update(stable_chain)
+    
+    def _is_chain_stable(self, board: OthelloBoard, r: int, c: int, 
+                        player: int, existing_stable: set) -> bool:
+        """체인에서 이 돌이 안정한지 확인"""
+        # 이미 안정하다고 확인된 돌과 인접하면 안정
+        for dr, dc in DIRECTIONS:
+            nr, nc = r + dr, c + dc
+            if (nr, nc) in existing_stable:
+                return True
+        
+        # 가장자리에 있고 끝까지 연결되어 있으면 안정
+        if r == 0 or r == 7 or c == 0 or c == 7:
+            return self._is_edge_connected_to_corner(board, r, c, player)
+        
+        return False
+    
+    def _find_stable_edges(self, board: OthelloBoard, player: int) -> set:
+        """🏁 완전 장악된 가장자리 라인 찾기"""
+        stable_edges = set()
+        
+        # 상하 가장자리 체크
+        for row in [0, 7]:
+            if self._is_edge_fully_controlled(board, row, 0, 0, 1, player):
+                for c in range(BOARD_SIZE):
+                    if board.board[row][c] == player:
+                        stable_edges.add((row, c))
+        
+        # 좌우 가장자리 체크  
+        for col in [0, 7]:
+            if self._is_edge_fully_controlled(board, 0, col, 1, 0, player):
+                for r in range(BOARD_SIZE):
+                    if board.board[r][col] == player:
+                        stable_edges.add((r, col))
+        
+        return stable_edges
+    
+    def _is_edge_fully_controlled(self, board: OthelloBoard, start_r: int, start_c: int,
+                                 dr: int, dc: int, player: int) -> bool:
+        """가장자리 라인이 완전히 장악되었는지 확인"""
+        for i in range(BOARD_SIZE):
+            r, c = start_r + i * dr, start_c + i * dc
+            if board.board[r][c] != EMPTY and board.board[r][c] != player:
+                return False
+        return True
+    
+    def _is_fully_stable(self, board: OthelloBoard, r: int, c: int, player: int) -> bool:
+        """🛡️ 8방향 모두에서 완전히 안전한지 확인"""
+        opponent = BLACK if player == WHITE else WHITE
+        
+        # 각 방향에서 뒤집힐 가능성 체크
+        for dr, dc in DIRECTIONS:
+            if not self._is_direction_stable(board, r, c, dr, dc, player):
+                return False
+        
+        return True
+    
+    def _is_direction_stable(self, board: OthelloBoard, r: int, c: int, 
+                           dr: int, dc: int, player: int) -> bool:
+        """특정 방향에서 안정한지 확인"""
+        opponent = BLACK if player == WHITE else WHITE
+        
+        # 이 방향으로 가면서 체크
+        nr, nc = r + dr, c + dc
+        
+        while 0 <= nr < BOARD_SIZE and 0 <= nc < BOARD_SIZE:
+            if board.board[nr][nc] == EMPTY:
+                return True  # 빈 칸이 있으면 안전
+            elif board.board[nr][nc] == player:
+                return True  # 같은 색 돌이 있으면 안전
+            # 상대 돌이면 계속 진행
+            nr, nc = nr + dr, nc + dc
+        
+        return True  # 보드 끝까지 도달하면 안전
+    
+    def _is_edge_connected_to_corner(self, board: OthelloBoard, r: int, c: int, player: int) -> bool:
+        """가장자리 돌이 코너까지 연결되어 있는지 확인"""
+        # 상하 가장자리
+        if r == 0 or r == 7:
+            # 왼쪽 코너까지 연결 체크
+            for check_c in range(c):
+                if board.board[r][check_c] != player:
+                    break
+            else:
+                return True  # 왼쪽 코너까지 연결됨
+                
+            # 오른쪽 코너까지 연결 체크
+            for check_c in range(c + 1, BOARD_SIZE):
+                if board.board[r][check_c] != player:
+                    break
+            else:
+                return True  # 오른쪽 코너까지 연결됨
+        
+        # 좌우 가장자리
+        if c == 0 or c == 7:
+            # 위쪽 코너까지 연결 체크
+            for check_r in range(r):
+                if board.board[check_r][c] != player:
+                    break
+            else:
+                return True  # 위쪽 코너까지 연결됨
+                
+            # 아래쪽 코너까지 연결 체크
+            for check_r in range(r + 1, BOARD_SIZE):
+                if board.board[check_r][c] != player:
+                    break
+            else:
+                return True  # 아래쪽 코너까지 연결됨
+        
+        return False
     
     def _is_stable_position(self, board: OthelloBoard, row: int, col: int, player: int) -> bool:
         """해당 위치가 안정한지 확인"""
@@ -505,6 +700,11 @@ class SuperOthelloAI:
             if score > best_score:
                 best_score = score
                 best_move = move
+        
+        # 🚀 성능 리포트 (캐시 효율성)
+        if self.cache_hits + self.cache_misses > 0:
+            cache_rate = self.cache_hits / (self.cache_hits + self.cache_misses) * 100
+            print(f"📊 캐시 효율: {cache_rate:.1f}% ({self.cache_hits}히트/{self.cache_misses}미스)")
         
         print(f"🎯 최선의 수: ({best_move.row}, {best_move.col}), 점수: {best_move.score}")
         return best_move
