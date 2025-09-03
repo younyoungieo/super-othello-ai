@@ -146,8 +146,8 @@
     <h1>🎮 오델로 게임</h1>
     
     <div class="score">
-        <span style="color: #333;">●</span> 당신: <span id="black">2</span> | 
-        <span style="color: #666;">○</span> AI: <span id="white">2</span>
+        <span id="playerIcon" style="color: #333;">●</span> 당신: <span id="playerScore">2</span> | 
+        <span id="aiIcon" style="color: #666;">○</span> AI: <span id="aiScore">2</span>
     </div>
     
     <div class="status" id="status">새 게임을 시작하세요</div>
@@ -155,6 +155,17 @@
     <div class="board" id="board"></div>
     
     <div class="controls">
+        <div class="color-selection" id="colorSelection" style="margin-bottom: 15px;">
+            <label style="margin-right: 20px; font-weight: bold;">색깔 선택:</label>
+            <label style="margin-right: 15px; cursor: pointer;">
+                <input type="radio" name="playerColor" value="1" checked style="margin-right: 5px;"> 
+                <span style="color: #333; font-size: 20px;">●</span> 검은색 (선공)
+            </label>
+            <label style="cursor: pointer;">
+                <input type="radio" name="playerColor" value="2" style="margin-right: 5px;"> 
+                <span style="color: #666; font-size: 20px;">○</span> 흰색 (후공)
+            </label>
+        </div>
         <button onclick="newGame()">🆕 새 게임</button>
         <button id="passButton" onclick="passMove()" style="display: none; margin-left: 10px; background: #ff6b6b; color: white;">⏭️ 패스</button>
     </div>
@@ -207,8 +218,8 @@
                     cell.classList.add('last-move');
                 }
                 
-                // 유효한 수 표시
-                if (gameState.current_player === 1 && !gameState.game_over) {
+                // 유효한 수 표시 (플레이어 턴일 때만)
+                if (gameState.current_player === gameState.player_color && !gameState.game_over) {
                     const isValid = gameState.valid_moves.some(move => move[0] === row && move[1] === col);
                     if (isValid) {
                         cell.classList.add('valid');
@@ -216,25 +227,39 @@
                 }
             });
             
-            // 점수 업데이트
-            document.getElementById('black').textContent = gameState.black_count;
-            document.getElementById('white').textContent = gameState.white_count;
+            // 점수와 아이콘 업데이트
+            const playerIcon = document.getElementById('playerIcon');
+            const aiIcon = document.getElementById('aiIcon');
+            const playerScore = document.getElementById('playerScore');
+            const aiScore = document.getElementById('aiScore');
+            
+            if (gameState.player_color === 1) { // 플레이어가 검은색
+                playerIcon.textContent = '●';
+                aiIcon.textContent = '○';
+                playerScore.textContent = gameState.black_count;
+                aiScore.textContent = gameState.white_count;
+            } else { // 플레이어가 흰색
+                playerIcon.textContent = '○';
+                aiIcon.textContent = '●';
+                playerScore.textContent = gameState.white_count;
+                aiScore.textContent = gameState.black_count;
+            }
             
             // 상태 업데이트
             const status = document.getElementById('status');
             const passButton = document.getElementById('passButton');
             
             if (gameState.game_over) {
-                if (gameState.winner === 1) {
+                if (gameState.winner === gameState.player_color) {
                     status.textContent = '🎉 당신이 이겼습니다!';
-                } else if (gameState.winner === 2) {
+                } else if (gameState.winner === gameState.ai_color) {
                     status.textContent = '😢 AI가 이겼습니다!';
                 } else {
                     status.textContent = '🤝 무승부입니다!';
                 }
                 passButton.style.display = 'none';
             } else {
-                if (gameState.current_player === 1) {
+                if (gameState.current_player === gameState.player_color) {
                     // 플레이어 턴일 때 유효한 수가 없으면 패스 버튼 표시
                     if (gameState.valid_moves.length === 0) {
                         status.textContent = '⏭️ 둘 수 있는 곳이 없습니다. 패스하세요!';
@@ -253,17 +278,36 @@
         // 새 게임
         async function newGame() {
             try {
+                // 선택된 플레이어 색깔 가져오기
+                const selectedColor = document.querySelector('input[name="playerColor"]:checked').value;
+                
                 const response = await fetch('/api/new_game', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        player_color: parseInt(selectedColor)
+                    })
                 });
                 
                 const data = await response.json();
                 if (data.success) {
                     sessionId = data.session_id;
                     gameState = data.game_state;
-                    lastAIMove = null; // 새 게임 시 초기화
+                    
+                    // AI가 첫 수를 뒀다면 기록
+                    if (data.ai_move) {
+                        lastAIMove = {
+                            row: data.ai_move.row,
+                            col: data.ai_move.col
+                        };
+                    } else {
+                        lastAIMove = null; // 새 게임 시 초기화
+                    }
+                    
                     updateBoard();
+                    
+                    // 색깔 선택 UI 숨기기
+                    document.getElementById('colorSelection').style.display = 'none';
                 } else {
                     alert('게임 시작 실패');
                 }
@@ -274,7 +318,7 @@
         
         // 수 두기
         async function makeMove(row, col) {
-            if (!sessionId || !gameState || gameState.current_player !== 1 || gameState.game_over) {
+            if (!sessionId || !gameState || gameState.current_player !== gameState.player_color || gameState.game_over) {
                 return;
             }
             
@@ -316,7 +360,7 @@
         
         // 패스 처리
         async function passMove() {
-            if (!sessionId || !gameState || gameState.current_player !== 1 || gameState.game_over) {
+            if (!sessionId || !gameState || gameState.current_player !== gameState.player_color || gameState.game_over) {
                 return;
             }
             

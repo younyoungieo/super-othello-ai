@@ -17,11 +17,13 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 game_sessions = {}
 
 class GameSession:
-    def __init__(self, session_id):
+    def __init__(self, session_id, player_color=BLACK):
         self.session_id = session_id
         self.board = OthelloBoard()
         self.ai = SuperOthelloAI()
-        self.current_player = BLACK  # 플레이어가 먼저
+        self.player_color = player_color  # 플레이어 색깔
+        self.ai_color = WHITE if player_color == BLACK else BLACK  # AI 색깔
+        self.current_player = BLACK  # 검은색이 선공
         self.game_over = False
         self.winner = None
         self.move_history = []
@@ -31,6 +33,8 @@ class GameSession:
         return {
             'board': self.board.board.tolist(),
             'current_player': int(self.current_player),
+            'player_color': int(self.player_color),
+            'ai_color': int(self.ai_color),
             'game_over': self.game_over,
             'winner': int(self.winner) if self.winner is not None else None,
             'black_count': int(self.board.count_discs(BLACK)),
@@ -47,13 +51,52 @@ def index():
 @app.route('/api/new_game', methods=['POST'])
 def new_game():
     """새 게임 시작"""
+    data = request.get_json() or {}
+    player_color = data.get('player_color', BLACK)  # 기본값은 검은색 (후공)
+    
+    # 유효한 색깔인지 확인
+    if player_color not in [BLACK, WHITE]:
+        player_color = BLACK
+    
     session_id = f"game_{int(time.time())}"
-    game_sessions[session_id] = GameSession(session_id)
+    game_sessions[session_id] = GameSession(session_id, player_color)
+    game = game_sessions[session_id]
+    
+    # AI가 선공(검은색)이면 첫 수를 둠
+    ai_move_result = None
+    if game.ai_color == BLACK:  # AI가 검은색(선공)인 경우
+        ai_moves = game.board.get_valid_moves(BLACK)
+        if ai_moves:
+            start_time = time.time()
+            best_move = game.ai.get_best_move(game.board, BLACK)
+            think_time = time.time() - start_time
+            
+            if best_move:
+                game.board.make_move(best_move.row, best_move.col, BLACK)
+                game.move_history.append({
+                    'player': 'ai',
+                    'row': int(best_move.row),
+                    'col': int(best_move.col),
+                    'score': int(best_move.score),
+                    'think_time': float(think_time),
+                    'timestamp': float(time.time())
+                })
+                
+                ai_move_result = {
+                    'row': int(best_move.row),
+                    'col': int(best_move.col),
+                    'score': int(best_move.score),
+                    'think_time': float(think_time)
+                }
+                
+                # 플레이어 턴으로 변경
+                game.current_player = game.player_color
     
     return jsonify({
         'success': True,
         'session_id': session_id,
-        'game_state': game_sessions[session_id].to_dict()
+        'game_state': game.to_dict(),
+        'ai_move': ai_move_result
     })
 
 @app.route('/api/make_move', methods=['POST'])
@@ -72,12 +115,12 @@ def make_move():
     if game.game_over:
         return jsonify({'success': False, 'error': 'Game is over'})
     
-    if game.current_player != BLACK:
+    if game.current_player != game.player_color:
         return jsonify({'success': False, 'error': 'Not your turn'})
     
     # 플레이어 수 실행
-    if game.board.is_valid_move(row, col, BLACK):
-        game.board.make_move(row, col, BLACK)
+    if game.board.is_valid_move(row, col, game.player_color):
+        game.board.make_move(row, col, game.player_color)
         game.move_history.append({
             'player': 'human',
             'row': int(row),
@@ -90,20 +133,20 @@ def make_move():
             game.game_over = True
             game.winner = game.board.get_winner()
         else:
-            game.current_player = WHITE
+            game.current_player = game.ai_color
         
         # AI 턴 처리
         ai_move_result = None
-        if not game.game_over and game.current_player == WHITE:
-            ai_moves = game.board.get_valid_moves(WHITE)
+        if not game.game_over and game.current_player == game.ai_color:
+            ai_moves = game.board.get_valid_moves(game.ai_color)
             if ai_moves:
                 # AI가 최고의 수 계산
                 start_time = time.time()
-                best_move = game.ai.get_best_move(game.board, WHITE)
+                best_move = game.ai.get_best_move(game.board, game.ai_color)
                 think_time = time.time() - start_time
                 
                 if best_move:
-                    game.board.make_move(best_move.row, best_move.col, WHITE)
+                    game.board.make_move(best_move.row, best_move.col, game.ai_color)
                     game.move_history.append({
                         'player': 'ai',
                         'row': int(best_move.row),
@@ -125,7 +168,7 @@ def make_move():
                 game.game_over = True
                 game.winner = game.board.get_winner()
             else:
-                game.current_player = BLACK
+                game.current_player = game.player_color
         
         return jsonify({
             'success': True,
@@ -154,11 +197,11 @@ def get_ai_hint(session_id):
         return jsonify({'success': False, 'error': 'Invalid session'})
     
     game = game_sessions[session_id]
-    if game.game_over or game.current_player != BLACK:
+    if game.game_over or game.current_player != game.player_color:
         return jsonify({'success': False, 'error': 'Cannot provide hint now'})
     
     # AI가 플레이어 입장에서 최고의 수 계산
-    best_move = game.ai.get_best_move(game.board, BLACK)
+    best_move = game.ai.get_best_move(game.board, game.player_color)
     
     if best_move:
         return jsonify({
@@ -187,29 +230,29 @@ def pass_turn():
         ai = session.ai
         
         # 현재 플레이어가 사람이어야 함
-        if session.current_player != BLACK:
+        if session.current_player != session.player_color:
             return jsonify({'success': False, 'error': 'Not player turn'})
         
         # 정말로 둘 수 있는 수가 없는지 확인
-        valid_moves = board.get_valid_moves(BLACK)
+        valid_moves = board.get_valid_moves(session.player_color)
         if valid_moves:
             return jsonify({'success': False, 'error': 'You have valid moves, cannot pass'})
         
         # 플레이어 패스 - AI 턴으로 변경
-        session.current_player = WHITE
+        session.current_player = session.ai_color
         ai_move = None
         
         # AI가 둘 수 있는지 확인
-        ai_valid_moves = board.get_valid_moves(WHITE)
+        ai_valid_moves = board.get_valid_moves(session.ai_color)
         if ai_valid_moves:
             # AI가 수를 둠
-            best_move = ai.get_best_move(board, WHITE)
+            best_move = ai.get_best_move(board, session.ai_color)
             if best_move:
-                board.make_move(best_move.row, best_move.col, WHITE)
+                board.make_move(best_move.row, best_move.col, session.ai_color)
                 ai_move = {'row': int(best_move.row), 'col': int(best_move.col)}
             
             # 다시 플레이어 턴으로
-            session.current_player = BLACK
+            session.current_player = session.player_color
         else:
             # AI도 둘 수 없음 - 게임 종료는 자동으로 처리됨
             pass

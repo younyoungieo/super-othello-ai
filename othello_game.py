@@ -16,8 +16,8 @@ from dataclasses import dataclass
 
 # 게임 상수
 EMPTY = 0
-BLACK = 1  # 플레이어 (사람)
-WHITE = 2  # AI
+BLACK = 1  # 검은색 (선공)
+WHITE = 2  # 흰색 (후공)
 BOARD_SIZE = 8
 
 # 방향 벡터 (8방향)
@@ -849,11 +849,47 @@ def play_game():
     ai = SuperOthelloAI()
     
     print("🏆 최강 오델로 AI에 도전하세요!")
-    print("당신은 ● (검은색), AI는 ○ (흰색)입니다.")
+    print("색깔을 선택하세요:")
+    print("1. ● 검은색 (선공)")
+    print("2. ○ 흰색 (후공)")
+    
+    while True:
+        try:
+            choice = int(input("선택 (1 또는 2): "))
+            if choice == 1:
+                player_color = BLACK
+                ai_color = WHITE
+                print("당신은 ● (검은색), AI는 ○ (흰색)입니다.")
+                break
+            elif choice == 2:
+                player_color = WHITE
+                ai_color = BLACK
+                print("당신은 ○ (흰색), AI는 ● (검은색)입니다.")
+                break
+            else:
+                print("1 또는 2를 입력하세요.")
+        except:
+            print("올바른 숫자를 입력하세요.")
+    
     print("좌표는 '행 열' 형식으로 입력하세요 (예: 2 3)")
     print()
     
-    current_player = BLACK  # 플레이어가 먼저
+    current_player = BLACK  # 검은색이 선공
+    
+    # AI가 선공(검은색)이면 첫 수를 둠
+    if ai_color == BLACK:
+        print("AI가 선공으로 첫 수를 둡니다...")
+        board.print_board()
+        print()
+        
+        start_time = time.time()
+        best_move = ai.get_best_move(board, BLACK)
+        if best_move:
+            board.make_move(best_move.row, best_move.col, BLACK)
+            think_time = time.time() - start_time
+            print(f"AI가 ({best_move.row}, {best_move.col})에 두었습니다. (점수: {best_move.score}, 시간: {think_time:.2f}초)")
+            current_player = player_color
+        print()
     
     while not board.is_game_over():
         board.print_board()
@@ -862,19 +898,19 @@ def play_game():
         moves = board.get_valid_moves(current_player)
         
         if not moves:
-            print(f"{'플레이어' if current_player == BLACK else 'AI'}가 둘 수 없습니다. 턴을 넘깁니다.")
+            print(f"{'플레이어' if current_player == player_color else 'AI'}가 둘 수 없습니다. 턴을 넘깁니다.")
             current_player = WHITE if current_player == BLACK else BLACK
             continue
         
-        if current_player == BLACK:  # 플레이어 턴
+        if current_player == player_color:  # 플레이어 턴
             print("당신의 턴입니다.")
             print(f"가능한 수: {[(m.row, m.col) for m in moves]}")
             
             try:
                 row, col = map(int, input("수를 입력하세요: ").split())
-                if board.is_valid_move(row, col, BLACK):
-                    board.make_move(row, col, BLACK)
-                    current_player = WHITE
+                if board.is_valid_move(row, col, player_color):
+                    board.make_move(row, col, player_color)
+                    current_player = ai_color
                 else:
                     print("유효하지 않은 수입니다!")
             except:
@@ -884,13 +920,13 @@ def play_game():
             print("AI가 생각 중...")
             start_time = time.time()
             
-            best_move = ai.get_best_move(board, WHITE)
+            best_move = ai.get_best_move(board, ai_color)
             if best_move:
-                board.make_move(best_move.row, best_move.col, WHITE)
+                board.make_move(best_move.row, best_move.col, ai_color)
                 think_time = time.time() - start_time
                 print(f"AI가 ({best_move.row}, {best_move.col})에 두었습니다. (점수: {best_move.score}, 시간: {think_time:.2f}초)")
             
-            current_player = BLACK
+            current_player = player_color
     
     # 게임 결과
     board.print_board()
@@ -900,11 +936,16 @@ def play_game():
     black_count = board.count_discs(BLACK)
     white_count = board.count_discs(WHITE)
     
-    print(f"최종 점수: 플레이어(●) {black_count} vs AI(○) {white_count}")
+    player_symbol = "●" if player_color == BLACK else "○"
+    ai_symbol = "○" if player_color == BLACK else "●"
+    player_score = black_count if player_color == BLACK else white_count
+    ai_score = white_count if player_color == BLACK else black_count
     
-    if winner == BLACK:
+    print(f"최종 점수: 플레이어({player_symbol}) {player_score} vs AI({ai_symbol}) {ai_score}")
+    
+    if winner == player_color:
         print("🎊 축하합니다! 당신이 승리했습니다!")
-    elif winner == WHITE:
+    elif winner == ai_color:
         print("🤖 AI가 승리했습니다. 다시 도전해보세요!")
     else:
         print("🤝 무승부입니다!")
