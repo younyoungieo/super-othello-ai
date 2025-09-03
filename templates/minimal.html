@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>오델로 게임</title>
+    <style>
+        body {
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            text-align: center;
+            margin: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .game-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        .board {
+            display: inline-grid;
+            grid-template-columns: repeat(8, 80px);
+            grid-template-rows: repeat(8, 80px);
+            gap: 2px;
+            background: #219653;
+            padding: 20px;
+            border-radius: 15px;
+            margin: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+        .cell {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        .cell.valid {
+            background: rgba(255, 255, 0, 0.3);
+            border-color: #ffd700;
+            box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+        }
+        .cell.valid::after {
+            content: '';
+            width: 20px;
+            height: 20px;
+            background: rgba(255, 215, 0, 0.8);
+            border-radius: 50%;
+            position: absolute;
+            animation: pulse 1s infinite;
+        }
+        .cell:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        .cell.last-move {
+            border: 3px solid #ff4444;
+            box-shadow: 0 0 15px rgba(255, 68, 68, 0.8);
+        }
+        .stone {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            animation: placeStone 0.3s ease-out;
+        }
+        .stone.black {
+            background: #333333;
+            color: white;
+        }
+        .stone.white {
+            background: #f2f2f2;
+            color: #333;
+            border: 1px solid #333;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.7; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.7; }
+        }
+        @keyframes placeStone {
+            0% { transform: scale(0); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        .score {
+            font-size: 18px;
+            margin: 10px;
+        }
+        .status {
+            font-size: 16px;
+            margin: 10px;
+            font-weight: bold;
+        }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+        }
+        button {
+            font-size: 16px;
+            padding: 12px 24px;
+            margin: 5px;
+            border: none;
+            border-radius: 8px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        #passButton {
+            background: #ff6b6b !important;
+            animation: pulse-red 2s infinite;
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 107, 107, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0); }
+        }
+    </style>
+</head>
+<body>
+    <h1>🎮 오델로 게임</h1>
+    
+    <div class="score">
+        <span style="color: #333;">●</span> 당신: <span id="black">2</span> | 
+        <span style="color: #666;">○</span> AI: <span id="white">2</span>
+    </div>
+    
+    <div class="status" id="status">새 게임을 시작하세요</div>
+    
+    <div class="board" id="board"></div>
+    
+    <div class="controls">
+        <button onclick="newGame()">🆕 새 게임</button>
+        <button id="passButton" onclick="passMove()" style="display: none; margin-left: 10px; background: #ff6b6b; color: white;">⏭️ 패스</button>
+    </div>
+    
+    <script>
+        let gameState = null;
+        let sessionId = null;
+        let lastAIMove = null;
+        
+        // 보드 생성
+        function createBoard() {
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            
+            for (let i = 0; i < 64; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.row = Math.floor(i / 8);
+                cell.dataset.col = i % 8;
+                cell.onclick = () => makeMove(Math.floor(i / 8), i % 8);
+                board.appendChild(cell);
+            }
+        }
+        
+        // 보드 업데이트
+        function updateBoard() {
+            if (!gameState) return;
+            
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach((cell, i) => {
+                const row = Math.floor(i / 8);
+                const col = i % 8;
+                const value = gameState.board[row][col];
+                
+                cell.innerHTML = '';
+                cell.className = 'cell';
+                
+                if (value === 1) {
+                    const stone = document.createElement('div');
+                    stone.className = 'stone black';
+                    cell.appendChild(stone);
+                } else if (value === 2) {
+                    const stone = document.createElement('div');
+                    stone.className = 'stone white';
+                    cell.appendChild(stone);
+                }
+                
+                // AI의 마지막 수 표시
+                if (lastAIMove && lastAIMove.row === row && lastAIMove.col === col) {
+                    cell.classList.add('last-move');
+                }
+                
+                // 유효한 수 표시
+                if (gameState.current_player === 1 && !gameState.game_over) {
+                    const isValid = gameState.valid_moves.some(move => move[0] === row && move[1] === col);
+                    if (isValid) {
+                        cell.classList.add('valid');
+                    }
+                }
+            });
+            
+            // 점수 업데이트
+            document.getElementById('black').textContent = gameState.black_count;
+            document.getElementById('white').textContent = gameState.white_count;
+            
+            // 상태 업데이트
+            const status = document.getElementById('status');
+            const passButton = document.getElementById('passButton');
+            
+            if (gameState.game_over) {
+                if (gameState.winner === 1) {
+                    status.textContent = '🎉 당신이 이겼습니다!';
+                } else if (gameState.winner === 2) {
+                    status.textContent = '😢 AI가 이겼습니다!';
+                } else {
+                    status.textContent = '🤝 무승부입니다!';
+                }
+                passButton.style.display = 'none';
+            } else {
+                if (gameState.current_player === 1) {
+                    // 플레이어 턴일 때 유효한 수가 없으면 패스 버튼 표시
+                    if (gameState.valid_moves.length === 0) {
+                        status.textContent = '⏭️ 둘 수 있는 곳이 없습니다. 패스하세요!';
+                        passButton.style.display = 'inline-block';
+                    } else {
+                        status.textContent = '🎯 당신 차례';
+                        passButton.style.display = 'none';
+                    }
+                } else {
+                    status.textContent = '🤖 AI 생각중...';
+                    passButton.style.display = 'none';
+                }
+            }
+        }
+        
+        // 새 게임
+        async function newGame() {
+            try {
+                const response = await fetch('/api/new_game', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    sessionId = data.session_id;
+                    gameState = data.game_state;
+                    lastAIMove = null; // 새 게임 시 초기화
+                    updateBoard();
+                } else {
+                    alert('게임 시작 실패');
+                }
+            } catch (error) {
+                alert('서버 오류');
+            }
+        }
+        
+        // 수 두기
+        async function makeMove(row, col) {
+            if (!sessionId || !gameState || gameState.current_player !== 1 || gameState.game_over) {
+                return;
+            }
+            
+            document.getElementById('status').textContent = '처리중...';
+            
+            try {
+                const response = await fetch('/api/make_move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        row: row,
+                        col: col
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    gameState = data.game_state;
+                    
+                    // AI가 수를 뒀다면 기록
+                    if (data.ai_move) {
+                        lastAIMove = {
+                            row: data.ai_move.row,
+                            col: data.ai_move.col
+                        };
+                    }
+                    
+                    updateBoard();
+                } else {
+                    alert('잘못된 수입니다');
+                    updateBoard();
+                }
+            } catch (error) {
+                alert('서버 오류');
+                updateBoard();
+            }
+        }
+        
+        // 패스 처리
+        async function passMove() {
+            if (!sessionId || !gameState || gameState.current_player !== 1 || gameState.game_over) {
+                return;
+            }
+            
+            document.getElementById('status').innerHTML = '<span class="loading">패스 처리중...</span>';
+            
+            try {
+                const response = await fetch('/api/pass', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    gameState = data.game_state;
+                    
+                    // AI가 수를 뒀다면 기록
+                    if (data.ai_move) {
+                        lastAIMove = {
+                            row: data.ai_move.row,
+                            col: data.ai_move.col
+                        };
+                    }
+                    
+                    updateBoard();
+                    
+                    // 패스 메시지 잠시 표시
+                    setTimeout(() => {
+                        updateBoard();
+                    }, 1000);
+                } else {
+                    alert('패스할 수 없습니다: ' + data.error);
+                    updateBoard();
+                }
+            } catch (error) {
+                alert('서버 오류');
+                updateBoard();
+            }
+        }
+        
+        // 페이지 로드시 보드 생성
+        createBoard();
+    </script>
+</body>
+</html>
