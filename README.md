@@ -37,7 +37,7 @@
 
 ### 1. 설치
 ```bash
-git clone https://github.com/yourusername/super-othello-ai.git
+git clone https://github.com/younyoungieo/super-othello-ai.git
 cd super-othello-ai
 pip install -r requirements.txt
 ```
@@ -56,7 +56,8 @@ python3 app.py
 - **AI Engine**: Custom Alpha-Beta with Minimax
 - **Frontend**: HTML5, CSS3, JavaScript
 - **Real-time**: WebSocket (Flask-SocketIO)
-- **Design**: Figma-based UI
+- **Design**: Figma-based UI (MCP Server 연동)
+- **Development**: MCP (Model Context Protocol) Server
 
 ## 📊 AI 성능
 
@@ -94,10 +95,11 @@ python3 app.py
 
 ## 🎨 디자인
 
-- **Figma 기반**: 전문적인 게임 보드 디자인
+- **Figma 기반**: MCP 서버를 통한 실시간 디자인 연동
+- **전문적 UI**: 게임 보드 및 인터페이스 디자인
 - **반응형**: 다양한 화면 크기 지원  
 - **애니메이션**: 돌 놓기, 유효한 수 표시 등
-- **직관적 UI**: 쉬운 조작과 명확한 피드백
+- **직관적 UX**: 쉬운 조작과 명확한 피드백
 
 ## 📝 개발 과정
 
@@ -117,14 +119,6 @@ python3 app.py
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📄 라이센스
-
-이 프로젝트는 MIT 라이센스 하에 배포됩니다. 자세한 내용은 `LICENSE` 파일을 참조하세요.
-
 ## 🎮 즐거운 게임 되세요!
 
 **친구들과의 대결에서 승리하고, 오델로 마스터가 되어보세요!** 🏆
-
----
-
-*Made with ❤️ for Othello lovers*
